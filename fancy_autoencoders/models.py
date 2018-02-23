@@ -4,6 +4,7 @@ Some simple wrappers on TensorFlow graphs that do various kinds of autoencoding
 
 import os
 import numpy as np
+from matplotlib import pyplot as plt
 import tensorflow as tf
 
 from utils.plotting import plot_weights
@@ -265,14 +266,18 @@ class Autoencoder(object):
         for fig_idx in range(len(enc_w_figs)):
           enc_w_figs[fig_idx].savefig(
               logging_dir + 'snapshot_enc_weights_' + str(fig_idx) + '.png')
+          plt.close(enc_w_figs[fig_idx])
         for fig_idx in range(len(dec_w_figs)):
           dec_w_figs[fig_idx].savefig(
               logging_dir + 'snapshot_dec_weights_' + str(fig_idx) + '.png')
+          plt.close(dec_w_figs[fig_idx])
         rand_img_inds = np.random.choice(np.arange(val_images.shape[0]), 9,
                                          replace=False)
         activation_plots = analyze_code(self.GetCodes(sess, val_images),
                                         rand_img_inds)
         activation_plots[0].savefig(logging_dir + 'snapshot_act_hist.png')
+        plt.close(activation_plots[0])
+        plt.close(activation_plots[1])
 
         snap_loss, snap_recons = self.Test(sess, val_images, True)
         reconplots = plot_reconstructions(val_images, snap_recons,
@@ -280,6 +285,8 @@ class Autoencoder(object):
             rand_img_inds)
         reconplots[0].savefig(logging_dir + 'snapshot_gt_imgs.png')
         reconplots[1].savefig(logging_dir + 'snapshot_recon_imgs.png')
+        plt.close(reconplots[0])
+        plt.close(reconplots[1])
 
       iternum += 1
 

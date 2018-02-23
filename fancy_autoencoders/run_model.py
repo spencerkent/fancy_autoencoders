@@ -11,14 +11,14 @@ from models import GDN_autoencoder
 from models import RELU_autoencoder
 import utils.plotting
 
-run_identifier = 'Feb22_devbranch'
+run_identifier = 'Hunting_for_filters_GDN_0_1s_15wd'
 
 image_params = {'height': 16, 'width': 16, 'depth': 1}
 hidden_layer_params = {'weight_init_std': 0.1, 'code_size': 256}  # two times overcomplete
 output_layer_params = {'weight_init_std': 0.1,
                        'loss_type': 'l2_recon_l1_sparsity',
-                       'init_sparsity_weight': 0.0,
-                       'init_weight_decay_weight': 0.0}
+                       'init_sparsity_weight': 0.1,
+                       'init_weight_decay_weight': 0.15}
 optimization_step_schedule = {0: 0.001, 30000: 0.0005,
                               50000: 0.0001, 150000: 0.00002}
 batch_size = 500
@@ -62,7 +62,7 @@ def main():
                                      batch_size, optimization_step_schedule,
                                      snapshot_progress=True,
                                      logging_dir=logfile_directory,
-                                     report_every=1000, max_epochs=50)
+                                     report_every=1000, max_epochs=200)
   gdn_autoencoder.SaveSession(tfsession, logfile_directory, run_identifier)
 
   # plot the learned encoding and decoding weights
@@ -74,9 +74,11 @@ def main():
   for idx in range(len(enc_figs)):
     enc_figs[idx].savefig(logfile_directory + run_identifier +
                           '_enc_weights' + str(idx) + '.png')
+    plt.close(enc_figs[idx])
   for idx in range(len(dec_figs)):
     dec_figs[idx].savefig(logfile_directory + run_identifier +
                           '_dec_weights' + str(idx) + '.png')
+    plt.close(dec_figs[idx])
 
   some_rand_inds = np.random.choice(np.arange(val_dset.shape[0]), 9,
                                     replace=False)
@@ -84,15 +86,19 @@ def main():
   coeff_figs = utils.plotting.analyze_code(coeffs, some_rand_inds)
   coeff_figs[0].savefig(logfile_directory + run_identifier +
                         '_activation_hists.png')
+  plt.close(coeff_figs[0])
   coeff_figs[1].savefig(logfile_directory + run_identifier +
                         '_random_samp_codes.png')
+  plt.close(coeff_figs[1])
   final_loss, final_recons = gdn_autoencoder.Test(tfsession, val_dset, True)
   recon_figs = utils.plotting.plot_reconstructions(val_dset, final_recons,
       image_params, some_rand_inds)
   recon_figs[0].savefig(logfile_directory + run_identifier +
                         '_samp_gt_imgs.png')
+  plt.close(recon_figs[0])
   recon_figs[1].savefig(logfile_directory + run_identifier +
                         '_samp_recon_imgs.png')
+  plt.close(recon_figs[1])
 
   tfsession.close()
 
