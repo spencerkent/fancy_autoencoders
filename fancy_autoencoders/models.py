@@ -28,9 +28,10 @@ class Autoencoder(object):
     self.images = tf.placeholder(tf.float32,
                                  shape=[None, self._image_flatsize],
                                  name='InputPatches')
+
   def _add_common_encoding(self, hiddenL_params):
     """
-    This is shared among all fancy autoencoder models. Just a linear transform
+    This is shared among all fancy autoencoder models. Just an affine transform
     """
     self.weight_hidden = tf.Variable(
         tf.truncated_normal([self._image_flatsize,
@@ -38,16 +39,15 @@ class Autoencoder(object):
                             stddev=hiddenL_params['weight_init_std']),
         name='WeightInputToHidden', dtype=tf.float32)
 
-    # Is it a a fair comparison if we get a bias to train too?
-    self.bias_hidden = tf.Variable(tf.constant(0.0, shape=[self._c_size]),
+    # Is it a fair comparison if we get a bias to train too?
+    self.bias_hidden = tf.Variable(tf.constant(-0.1, shape=[self._c_size]),
                                    dtype=tf.float32)
-    self.neuron_currents = tf.matmul(self.images, self.weight_hidden) + \
-                           self.bias_hidden
-    # self.neuron_currents = tf.matmul(self.images, self.weight_hidden)
+    self.neuron_currents = (tf.matmul(self.images, self.weight_hidden)
+                            + self.bias_hidden)
 
   def _add_common_decoding(self, outputL_params):
     """
-    This is shared among all fancy autoencoder models. Just a linear transform
+    This is shared among all fancy autoencoder models. Just an affine transform
     """
     self.weight_output = tf.Variable(
         tf.truncated_normal([self._c_size,
@@ -55,14 +55,13 @@ class Autoencoder(object):
                             stddev=outputL_params['weight_init_std']),
         name='WeightHiddenToOutput', dtype=tf.float32)
 
-    # Is it a a fair comparison if we get a bias to train too?
+    # Is it a fair comparison if we get a bias to train too?
     self.bias_output = tf.Variable(
-      tf.constant(0.0, shape=[self._image_flatsize]), dtype=tf.float32)
+      tf.constant(-0.1, shape=[self._image_flatsize]), dtype=tf.float32)
     self.output = tf.matmul(self.neuron_activations_inv, self.weight_output) + \
                    self.bias_output
-    # self.output = tf.matmul(self.neuron_activations_inv, self.weight_output)
 
-  def _add_loss(self, outputL_params, default_opt_step):
+  def _add_loss(self, outputL_params):
     """
     Shared among all fancy autoencoder models
     """
@@ -72,8 +71,8 @@ class Autoencoder(object):
       self.loss = tf.reduce_mean(tf.sqrt(tf.reduce_sum(
         tf.square(tf.subtract(self.output, self.images)), axis=1)))
 
-    elif self._loss_type == 'l2_recon_l1_sparsity':
-      self.sparsity_wt = tf.constant(outputL_params['init_sparsity_weight'])
+    elif self._loss_type == 'l2recon_l1sparsity':
+      self.sparsity_wt = tf.constant(0.0)  # we'll change this on the fly
       self.loss = (
           tf.reduce_mean(tf.sqrt(tf.reduce_sum(tf.square(
             tf.subtract(self.output, self.images)), axis=1))) +
@@ -81,21 +80,29 @@ class Autoencoder(object):
             tf.reduce_sum(tf.abs(self.neuron_activations), axis=1)))
 
     elif self._loss_type == 'l2recon_l1sparsity_wd':
-      self.sparsity_wt = tf.constant(outputL_params['init_sparsity_weight'])
-      self.weight_decay_wt = tf.constant(outputL_params['init_wd_weight'])
+      # l2 + l1 + weight decay
+      self.sparsity_wt = tf.constant(0.0)  # we'll change this on the fly
+      self.weight_decay_wt = tf.constant(0.0)  # this too
+      # we'll normalize the weight decay by the output dimension of the matrix
+      # this will make the values a little more sensible
+      normed_wd_wt_enc = tf.divide(self.weight_decay_wt, self._c_size)
+      normed_wd_wt_dec = tf.divide(self.weight_decay_wt, self._image_flatsize)
       self.loss = (
           tf.reduce_mean(tf.sqrt(tf.reduce_sum(tf.square(
             tf.subtract(self.output, self.images)), axis=1))) +
           self.sparsity_wt * tf.reduce_mean(
             tf.reduce_sum(tf.abs(self.neuron_activations), axis=1)) +
-          self.weight_decay_wt * tf.sqrt(tf.reduce_sum(
-            tf.square(self.weight_hidden))) +
-          self.weight_decay_wt * tf.sqrt(tf.reduce_sum(
-            tf.square(self.weight_output))))
+          normed_wd_wt_enc * tf.reduce_sum(
+            tf.square(self.weight_hidden)) +
+          normed_wd_wt_dec * tf.reduce_sum(
+            tf.square(self.weight_output)))
+    else:
+      raise KeyError('loss type ' + self._loss_type + ' not recognized')
 
-    self.opt_step = tf.constant(default_opt_step)
-    self.optimizer_step = \
-        tf.train.AdamOptimizer(self.opt_step).minimize(self.loss)
+    self.opt_step = tf.constant(0.0)
+    self.optimizer_step = tf.train.MomentumOptimizer(
+        self.opt_step, 0.9, True).minimize(self.loss)
+    #^ the momentum optimizer seems to work better here...
 
   def _add_remaining_misc(self):
     self.variables_saver = None
@@ -105,6 +112,25 @@ class Autoencoder(object):
       self.learned_params = self.learned_params + \
         tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES,
                           scope=section)
+  # END private functions we'll use in derived classes to construct the graph
+  ###########################################################################
+
+
+  def GetEncDecWeights(self, sess):
+    return (self.weight_hidden.eval(session=sess),
+            self.weight_output.eval(session=sess))
+
+
+  def GetCodes(self, sess, inputs):
+    return sess.run(self.neuron_activations, feed_dict={self.images: inputs})
+
+
+  def SampleFromCode(self, sess, code_input):
+    """
+    We can easily insert any code into the latent layer and sample images
+    """
+    return sess.run(self.output,
+                    feed_dict={self.neuron_activations: code_input})
 
 
   def StartSession(self, checkpoint_file=None):
@@ -172,8 +198,12 @@ class Autoencoder(object):
         Each row indexes a image of size self._image_flatsize. Images cast to
         float32. We'll check these to determine when to stop training
     step_schedule : dictionary
-        Contains iterations numbers at which to set (reset) the ADAM step size
-        Example: {0: 0.001, 1e4: 0.0001, 1e8: 0.00001}
+        'OPT_step': dictionary
+          Contains iterations numbers at which to set (reset) the ADAM step size
+        'sparsity_wt': dictionary, optional
+          Contains iterations numbers at which to set (reset) the sparsity weight
+        'weight_decay_wt': dictionary, optional
+          Contains iterations numbers at which to set (reset) the wd weight
     shapshot_progress : bool, optional
         If true, we periodically save some plots to disk so we can check
         training progress. These will overwrite eachother. We plot
@@ -196,7 +226,16 @@ class Autoencoder(object):
     """
     assert train_images.shape[1] == self._image_flatsize
     assert val_images.shape[1] == self._image_flatsize
-    assert 0 in step_schedule, 'please indicate initial ADAM step size'
+    assert 0 in step_schedule['OPT_step'], ('please indicate initial ' +
+                                            'optimizer step size')
+    if self._loss_type in ['l2recon_l1sparsity', 'l2recon_l1sparsity_wd']:
+      assert 'sparsity_wt' in step_schedule
+      assert 0 in step_schedule['sparsity_wt'], ('please indicate initial ' +
+                                                 'sparsity weight')
+    if self._loss_type == 'l2recon_l1sparsity_wd':
+      assert 'weight_decay_wt' in step_schedule
+      assert 0 in step_schedule['weight_decay_wt'], ('please indicate initial ' +
+                                                     'weight decay weight')
     ts_size = train_images.shape[0]
     vs_size = val_images.shape[0]
 
@@ -205,11 +244,11 @@ class Autoencoder(object):
     self.training_loss_report_step = report_every
     self.validation_metric = []
     self.validation_metric_report_step = report_every * 10
-    self.snapshot_report_step = report_every * 100
+    self.snapshot_report_step = report_every * 50
     val_metric_improved = True
     burn_in_period = max_epochs // 10  # don't check the validation error
-                                      # until the net has been training for
-                                      # this long
+                                       # until the net has been training for
+                                       # this long
 
     batch_idx_perm = np.arange(train_images.shape[0])
     b_idx = 0
@@ -226,12 +265,35 @@ class Autoencoder(object):
       batch_images = train_images[batch_idx_perm[b_idx:b_idx+batch_size]]
       b_idx += batch_size
 
-      if iternum in step_schedule:
-        current_step_size = step_schedule[iternum]
 
-      self.optimizer_step.run(session=sess,
-                              feed_dict={self.images: batch_images,
-                                         self.opt_step: current_step_size})
+      if iternum in step_schedule['OPT_step']:
+        # change the optimizer step
+        current_step_size = step_schedule['OPT_step'][iternum]
+
+      if self._loss_type == 'l2':
+        self.optimizer_step.run(session=sess,
+                                feed_dict={self.images: batch_images,
+                                           self.opt_step: current_step_size})
+      elif self._loss_type == 'l2recon_l1sparsity':
+        if iternum in step_schedule['sparsity_wt']:
+          # change the sparsity weight
+          current_sparsity_wt = step_schedule['sparsity_wt'][iternum]
+        self.optimizer_step.run(session=sess,
+                                feed_dict={self.images: batch_images,
+                                           self.opt_step: current_step_size,
+                                           self.sparsity_wt: current_sparsity_wt})
+      elif self._loss_type == 'l2recon_l1sparsity_wd':
+        if iternum in step_schedule['sparsity_wt']:
+          # change the sparsity weight
+          current_sparsity_wt = step_schedule['sparsity_wt'][iternum]
+        if iternum in step_schedule['weight_decay_wt']:
+          # change the weight decay weight
+          current_wd_wt = step_schedule['weight_decay_wt'][iternum]
+        self.optimizer_step.run(session=sess,
+                                feed_dict={self.images: batch_images,
+                                           self.opt_step: current_step_size,
+                                           self.sparsity_wt: current_sparsity_wt,
+                                           self.weight_decay_wt: current_wd_wt})
 
       if iternum % report_every == 0:
         cost = sess.run(self.loss, feed_dict={self.images: batch_images})
@@ -265,17 +327,17 @@ class Autoencoder(object):
 
         for fig_idx in range(len(enc_w_figs)):
           enc_w_figs[fig_idx].savefig(
-              logging_dir + 'snapshot_enc_weights_' + str(fig_idx) + '.png')
+              logging_dir + 'snapshot_2_enc_weights_' + str(fig_idx) + '.png')
           plt.close(enc_w_figs[fig_idx])
         for fig_idx in range(len(dec_w_figs)):
           dec_w_figs[fig_idx].savefig(
-              logging_dir + 'snapshot_dec_weights_' + str(fig_idx) + '.png')
+              logging_dir + 'snapshot_2_dec_weights_' + str(fig_idx) + '.png')
           plt.close(dec_w_figs[fig_idx])
         rand_img_inds = np.random.choice(np.arange(val_images.shape[0]), 9,
                                          replace=False)
         activation_plots = analyze_code(self.GetCodes(sess, val_images),
                                         rand_img_inds)
-        activation_plots[0].savefig(logging_dir + 'snapshot_act_hist.png')
+        activation_plots[0].savefig(logging_dir + 'snapshot_2_act_hist.png')
         plt.close(activation_plots[0])
         plt.close(activation_plots[1])
 
@@ -283,8 +345,8 @@ class Autoencoder(object):
         reconplots = plot_reconstructions(val_images, snap_recons,
             {'height': self._image_height, 'width': self._image_width},
             rand_img_inds)
-        reconplots[0].savefig(logging_dir + 'snapshot_gt_imgs.png')
-        reconplots[1].savefig(logging_dir + 'snapshot_recon_imgs.png')
+        reconplots[0].savefig(logging_dir + 'snapshot_2_gt_imgs.png')
+        reconplots[1].savefig(logging_dir + 'snapshot_2_recon_imgs.png')
         plt.close(reconplots[0])
         plt.close(reconplots[1])
 
@@ -356,15 +418,6 @@ class Autoencoder(object):
       return loss
 
 
-  def GetEncDecWeights(self, sess):
-    return (self.weight_hidden.eval(session=sess),
-            self.weight_output.eval(session=sess))
-
-
-  def GetCodes(self, sess, inputs):
-    return sess.run(self.neuron_activations, feed_dict={self.images: inputs})
-
-
 
 ####################################
 # now we define some specific models
@@ -390,20 +443,10 @@ class GDN_autoencoder(Autoencoder):
         feedforward weights
       'loss_type' : str
         Currently one of {'l2', 'l2recon_l1sparsity','l2recon_l1sparsity_wd'}
-      'init_sparsity_weight' : float, optional
-        The value of \lambda, the weight on the second term when we are
-        using the l1-regularized sparse loss
-      'init_wd_weight' : float, optional
-        The value of \beta, the weight on the third term when we are
-        using the l1-regularized sparse loss WITH WEIGHT DECAY
   image_params : dictionary
       Keys are 'height', 'width', 'depth'
-  default_opt_step : float
-      The default value to instantiate ADAM with. We can change this at training
-      time by passing the step_schedule parameter to this object's Train method
   """
-  def __init__(self, hiddenL_params, outputL_params,
-               image_params, default_opt_step):
+  def __init__(self, hiddenL_params, outputL_params, image_params):
 
     with tf.name_scope('Input'):
       self._add_inputs(image_params, hiddenL_params)
@@ -441,7 +484,7 @@ class GDN_autoencoder(Autoencoder):
       self._add_common_decoding(outputL_params)
 
     with tf.name_scope('Loss'):
-      self._add_loss(outputL_params, default_opt_step)
+      self._add_loss(outputL_params)
 
     self._add_remaining_misc()
 
@@ -580,12 +623,8 @@ class RELU_autoencoder(Autoencoder):
         using the l1-regularized sparse loss WITH WEIGHT DECAY
   image_params : dictionary
       Keys are 'height', 'width', 'depth'
-  default_opt_step : float
-      The default value to instantiate ADAM with. We can change this at training
-      time by passing the step_schedule parameter to this object's Train method
   """
-  def __init__(self, hiddenL_params, outputL_params,
-               image_params, default_opt_step):
+  def __init__(self, hiddenL_params, outputL_params, image_params):
 
     with tf.name_scope('Input'):
       self._add_inputs(image_params, hiddenL_params)
@@ -593,8 +632,7 @@ class RELU_autoencoder(Autoencoder):
     with tf.name_scope('Encoding'):
       self._add_common_encoding(hiddenL_params)
 
-      self.neuron_activations = tf.nn.relu(self.neuron_currents,
-                                           name='relu_codes')
+      self.neuron_activations = tf.nn.relu(self.neuron_currents)
     with tf.name_scope('Decoding'):
       self.neuron_activations_inv = self.neuron_activations
       # no inversion of the nonlinearity in the RELU model
@@ -602,6 +640,54 @@ class RELU_autoencoder(Autoencoder):
       self._add_common_decoding(outputL_params)
 
     with tf.name_scope('Loss'):
-      self._add_loss(outputL_params, default_opt_step)
+      self._add_loss(outputL_params)
+
+    self._add_remaining_misc()
+
+class sigmoid_autoencoder(Autoencoder):
+  """
+  A sigmoid-based autoencoder
+
+  Parameters
+  ----------
+  hiddenL_params : dictionary
+      'weight_init_std' : float
+        The standard deviation of the random gaussian initialization for
+        feedforward weights
+      'code_size' : int
+        Number of neurons in the hidden layer AKA code length
+  outputL_params : dictionary
+      'weight_init_std' : float
+        The standard deviation of the random gaussian initialization for
+        feedforward weights
+      'loss_type' : str
+        Currently one of {'l2', 'l2recon_l1sparsity','l2recon_l1sparsity_wd'}
+      'init_sparsity_weight' : float, optional
+        The value of \lambda, the weight on the second term when we are
+        using the l1-regularized sparse loss
+      'init_wd_weight' : float, optional
+        The value of \beta, the weight on the third term when we are
+        using the l1-regularized sparse loss WITH WEIGHT DECAY
+  image_params : dictionary
+      Keys are 'height', 'width', 'depth'
+  """
+  def __init__(self, hiddenL_params, outputL_params, image_params):
+
+    with tf.name_scope('Input'):
+      self._add_inputs(image_params, hiddenL_params)
+
+    with tf.name_scope('Encoding'):
+      self._add_common_encoding(hiddenL_params)
+
+      self.neuron_activations = tf.nn.sigmoid(self.neuron_currents)
+      # have been experimenting w/ dropout too
+    with tf.name_scope('Decoding'):
+      self.neuron_activations_inv = self.neuron_activations
+      # no inversion of the nonlinearity in the sigmoid model
+
+      self._add_common_decoding(outputL_params)
+
+    with tf.name_scope('Loss'):
+      self._add_loss(outputL_params)
 
     self._add_remaining_misc()
