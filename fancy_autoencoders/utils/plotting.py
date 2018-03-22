@@ -249,10 +249,16 @@ def plot_reconstructions(ground_truth, recons, img_params, specific_imgs=None):
 
   recon_plot = plt.figure(figsize=(10, 10))
   for idx in range(num_samps):
-    plt.subplot(int(np.sqrt(num_samps)), int(np.sqrt(num_samps)), idx + 1)
-    plt.imshow(np.reshape(recons[inds[idx], :],
-                         (img_params['height'],
-                          img_params['width'])), cmap='gray')
+    # compute the PSNR of the reconstruction
+    mse = np.mean(np.square(recons[inds[idx], :] - ground_truth[inds[idx], :]))
+    psnr = 10 * np.log10(1. / mse)
+    ax = plt.subplot(int(np.sqrt(num_samps)), int(np.sqrt(num_samps)), idx + 1)
+    ax.imshow(np.reshape(recons[inds[idx], :],
+                         (img_params['height'], img_params['width'])),
+              cmap='gray')
+    ax.text(0.01, 0.97, '{:.2f} dB'.format(psnr),
+            horizontalalignment='left', verticalalignment='top',
+            transform=ax.transAxes, color='white', fontsize=10)
     plt.axis('off')
   plt.suptitle('Reconstructions images')
 
