@@ -14,21 +14,23 @@ from models import GDN_autoencoder
 # from models import sigmoid_autoencoder
 import utils.plotting
 
-run_identifier = 'testing_before_push'
+run_identifier = 'sparse_GDN'
 logfile_directory = '/media/expansion1/spencerkent/logfiles/fancy_autoencoder/'
 
 image_params = {'height': 16, 'width': 16, 'depth': 1}
 hidden_layer_params = {'weight_init_std': 0.1, 'code_size': 256}
 output_layer_params = {'weight_init_std': 0.1,
                        'loss_type': 'l2recon_l1sparsity_wd'}
-optimization_step_schedule = {'OPT_step': {0: 0.01, 200000: 0.004,
-                                           500000: 0.001},
-                              'sparsity_wt': {0: 0.000},
-                              'weight_decay_wt': {0: 0.13}}
+optimization_step_schedule = {'OPT_step': {0: 0.001, 50000: 0.0001,
+                                           100000: 0.00001},
+                              'sparsity_wt': {0: 0.03},
+                              'weight_decay_wt': {0: 4.0}}
 batch_size = 256
 # #sophias dataset for cosyne
-training_set_filename = '/home/spencerkent/Datasets/vanHaterenNaturalScenes/sophias_patches_preZCAwhite_train.npz'
-testing_set_filename = '/home/spencerkent/Datasets/vanHaterenNaturalScenes/test_zca_wht_v2.npz'
+# training_set_filename = '/home/spencerkent/Datasets/vanHaterenNaturalScenes/sophias_patches_preZCAwhite_train.npz'
+# testing_set_filename = '/home/spencerkent/Datasets/vanHaterenNaturalScenes/test_zca_wht_v2.npz'
+training_set_filename = '/home/spencerkent/Datasets/Field_natural_images/field_1mil_patches.p'
+testing_set_filename = '/home/spencerkent/Datasets/Field_natural_images/field_100k_test_patches.p'
 # baboon_filename = '/home/spencerkent/Datasets/vanHaterenNaturalScenes/baboon_zca_wht.npz'
 
 
@@ -41,43 +43,49 @@ def main():
                                  '_model_params.p', 'wb'))
 
   # wrangling the natural image patches dataset
-  with np.load(training_set_filename, fix_imports=True) as d:
-    sanborn_dset = d['arr_0'].item()['train']
-  with np.load(testing_set_filename, fix_imports=True) as d:
-    sanborn_dset_test = d['arr_0'].item()['train']
-  # with np.load(baboon_filename, fix_imports=True) as d:
-  #   baboon = d['arr_0'].item()['train']
+  # with np.load(training_set_filename, fix_imports=True) as d:
+  #   sanborn_dset = d['arr_0'].item()['train']
+  # with np.load(testing_set_filename, fix_imports=True) as d:
+  #   sanborn_dset_test = d['arr_0'].item()['train']
+  # # with np.load(baboon_filename, fix_imports=True) as d:
+  # #   baboon = d['arr_0'].item()['train']
+  #
+  # preproc_subtractive_term = np.min(sanborn_dset.images)
+  # preproc_divisive_term = np.max(sanborn_dset.images -
+  #                                preproc_subtractive_term)
+  #
+  # num_val = int(0.2 * sanborn_dset.num_examples)  # number of validation patches
+  # random_idx = np.arange(sanborn_dset.num_examples)
+  # np.random.shuffle(random_idx)
+  # train_dset = sanborn_dset.images[random_idx[0:-num_val], :]
+  # train_dset = (train_dset - preproc_subtractive_term) / preproc_divisive_term
+  # val_dset = sanborn_dset.images[random_idx[-num_val:], :]
+  # val_dset = (val_dset - preproc_subtractive_term) / preproc_divisive_term
+  # test_dset = np.copy(sanborn_dset_test.images)
+  # test_dset = (test_dset - preproc_subtractive_term) / preproc_divisive_term
+  #
+  # # now some mean subtraction
+  # raw_component_means = np.mean(train_dset, axis=0)
+  # train_dset = train_dset - raw_component_means
+  # val_dset = val_dset - raw_component_means
+  # test_dset = test_dset - raw_component_means
+  # np.savez(open(
+  #   '/home/spencerkent/Datasets/vanHaterenNaturalScenes/preproc_params.npz',
+  #   'wb'), means=raw_component_means, preproc_div=preproc_divisive_term,
+  #          preproc_sub=preproc_subtractive_term)
+  train_dset = pickle.load(open(training_set_filename, 'rb'))
 
-  preproc_subtractive_term = np.min(sanborn_dset.images)
-  preproc_divisive_term = np.max(sanborn_dset.images -
-                                 preproc_subtractive_term)
-
-  num_val = int(0.2 * sanborn_dset.num_examples)  # number of validation patches
-  random_idx = np.arange(sanborn_dset.num_examples)
+  num_val = int(0.2 * train_dset.shape[0])  # number of validation patches
+  random_idx = np.arange(train_dset.shape[0])
   np.random.shuffle(random_idx)
-  train_dset = sanborn_dset.images[random_idx[0:-num_val], :]
-  train_dset = (train_dset - preproc_subtractive_term) / preproc_divisive_term
-  val_dset = sanborn_dset.images[random_idx[-num_val:], :]
-  val_dset = (val_dset - preproc_subtractive_term) / preproc_divisive_term
-  test_dset = np.copy(sanborn_dset_test.images)
-  test_dset = (test_dset - preproc_subtractive_term) / preproc_divisive_term
-
-  # now some mean subtraction
-  raw_component_means = np.mean(train_dset, axis=0)
-  train_dset = train_dset - raw_component_means
-  val_dset = val_dset - raw_component_means
-  test_dset = test_dset - raw_component_means
-  np.savez(open(
-    '/home/spencerkent/Datasets/vanHaterenNaturalScenes/preproc_params.npz',
-    'wb'), means=raw_component_means, preproc_div=preproc_divisive_term,
-           preproc_sub=preproc_subtractive_term)
-
-
-
+  val_dset = train_dset[random_idx[-num_val:], :]
+  train_dset = train_dset[random_idx[0:-num_val], :]
+  test_dset = pickle.load(open(testing_set_filename, 'rb'))
+  #^ already whitened and approximately mean zero
 
   print("Constructing Tensorflow Graph")
   sig_ae = GDN_autoencoder(hidden_layer_params, output_layer_params,
-                                    image_params)
+                           image_params)
 
   # training from scratch
   tfsession = sig_ae.StartSession()
@@ -85,7 +93,7 @@ def main():
   trn_report = sig_ae.Train(tfsession, train_dset, val_dset, batch_size,
                             optimization_step_schedule, snapshot_progress=True,
                             logging_dir=logfile_directory, report_every=1000,
-                            max_epochs=150)
+                            max_epochs=200)
 
   sig_ae.SaveSession(tfsession, logfile_directory, run_identifier)
 

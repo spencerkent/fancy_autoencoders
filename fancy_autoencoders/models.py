@@ -100,9 +100,13 @@ class Autoencoder(object):
       raise KeyError('loss type ' + self._loss_type + ' not recognized')
 
     self.opt_step = tf.constant(0.0)
-    self.optimizer_step = tf.train.MomentumOptimizer(
-        self.opt_step, 0.9, True).minimize(self.loss)
+    # self.optimizer_step = tf.train.MomentumOptimizer(
+    #     self.opt_step, 0.9, True).minimize(self.loss)
     #^ the momentum optimizer seems to work better here...
+    self.optimizer_step = tf.train.AdamOptimizer(
+        self.opt_step).minimize(self.loss)
+    # self.optimizer_step = tf.train.GradientDescentOptimizer(
+    #     self.opt_step).minimize(self.loss)
 
   def _add_remaining_misc(self):
     self.variables_saver = None
@@ -308,7 +312,7 @@ class Autoencoder(object):
         val_mean  = self.Test(sess, val_images)
 
         if epochs_completed >= burn_in_period:
-          moving_avg = np.mean(self.validation_metric[-3:])
+          moving_avg = np.mean(self.validation_metric[-10:])
           val_metric_improved = val_mean < moving_avg
 
         self.validation_metric.append(val_mean)
