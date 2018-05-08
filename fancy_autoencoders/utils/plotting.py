@@ -89,9 +89,10 @@ def plot_weights(weight_tensor, img_params, enc_dec='encoding',
 
       if single_img:
         if renormalize:
-          this_weight = (weight_tensor[:, weight_idx] /
-                         np.max(np.abs(weight_tensor[:, weight_idx])))
-          #^ now guaranteed to be in [-1, 1]
+          this_weight = weight_tensor[:, weight_idx]
+          this_weight = this_weight - np.min(this_weight)
+          this_weight = this_weight / np.max(this_weight)
+          #^ now guaranteed to be in [0, 1]
         else:
           this_weight = np.copy(weight_tensor[:, weight_idx])
 
